@@ -3,19 +3,36 @@ use super::*;
 pub(super) async fn block(
   Extension(index): Extension<Arc<Index>>,
   Path(DeserializeFromStr(query)): Path<DeserializeFromStr<query::Block>>,
-) -> ServerResult<Json<String>> {
+) -> ServerResult<(HeaderMap, Json<String>)> {
   task::block_in_place(|| {
-    let hash = match query {
-      query::Block::Hash(hash) => hash,
-      query::Block::Height(height) => index
-        .block_hash(Some(height))?
-        .ok_or_not_found(|| format!("block {height}"))?,
+    let (hash, cache) = match query {
+      query::Block::Hash(hash) => (hash, true),
+      query::Block::Height(height) => (
+        index
+          .block_hash(Some(height))?
+          .ok_or_not_found(|| format!("block {height}"))?,
+        index.block_count()?.saturating_sub(height) >= CACHE_CONFIRMATIONS,
+      ),
     };
 
-    Ok(Json(
-      index
-        .get_block_hex(hash)?
-        .ok_or_not_found(|| format!("block {hash}"))?,
+    let mut headers = HeaderMap::new();
+
+    headers.insert(
+      header::CACHE_CONTROL,
+      HeaderValue::from_static(if cache {
+        "public, max-age=1209600, immutable"
+      } else {
+        "no-store"
+      }),
+    );
+
+    Ok((
+      headers,
+      Json(
+        index
+          .get_block_hex(hash)?
+          .ok_or_not_found(|| format!("block {hash}"))?,
+      ),
     ))
   })
 }
