@@ -47,6 +47,7 @@ pub mod query;
 mod r;
 mod server_config;
 
+const CACHE_CONFIRMATIONS: u32 = 100;
 const MEBIBYTE: usize = 1 << 20;
 const PAGE_SIZE: usize = 100;
 
@@ -4510,6 +4511,15 @@ mod tests {
 
     server.assert_response("/r/block/1", StatusCode::NOT_FOUND, "block 1 not found");
 
+    assert_eq!(
+      server
+        .get("/r/block/1")
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .unwrap(),
+      "no-store",
+    );
+
     let block = server.mine_blocks(1)[0].clone();
     let hex = format!("\"{}\"", consensus::encode::serialize_hex(&block));
 
@@ -4523,6 +4533,46 @@ mod tests {
       "/r/block/467a86f0642b1d284376d13a98ef58310caa49502b0f9a560ee222e0a122fe16",
       StatusCode::NOT_FOUND,
       "block 467a86f0642b1d284376d13a98ef58310caa49502b0f9a560ee222e0a122fe16 not found",
+    );
+
+    assert_eq!(
+      server
+        .get(format!("/r/block/{}", block.block_hash()))
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .unwrap(),
+      "public, max-age=1209600, immutable",
+    );
+
+    assert_eq!(
+      server
+        .get("/r/block/1")
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .unwrap(),
+      "no-store",
+    );
+
+    server.mine_blocks((CACHE_CONFIRMATIONS - 2).into());
+
+    assert_eq!(
+      server
+        .get("/r/block/1")
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .unwrap(),
+      "no-store",
+    );
+
+    server.mine_blocks(1);
+
+    assert_eq!(
+      server
+        .get("/r/block/1")
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .unwrap(),
+      "public, max-age=1209600, immutable",
     );
   }
 
